@@ -9,7 +9,7 @@ import CompletionPage from './pages/CompletionPage';
 import DashboardPage from './pages/DashboardPage';
 import BottomNav from './components/BottomNav';
 import { supabase } from './lib/supabase';
-import { generateRescuePlan } from './lib/rescue_plans';
+import { generateRescuePlan } from './lib/rescuePlans';
 import type { RescuePlan } from './lib/supabase';
 
 type Page = 'home' | 'rescue' | 'dashboard';
