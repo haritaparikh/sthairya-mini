@@ -29,7 +29,7 @@ export type Checkin = {
 export type RescuePlan = {
   id: string;
   user_id: string;
-  checkin_id: string | null;
+  check_in_id: string | null;
   title: string;
   motivational_message: string;
   steps: string[];

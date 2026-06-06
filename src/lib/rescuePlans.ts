@@ -202,7 +202,7 @@ const DURATION_MAP: Record<string, number> = {
   '20 minutes': 20,
 };
 
-export function generateRescuePlan(input: CheckinInput): Omit<RescuePlan, 'id' | 'user_id' | 'checkin_id' | 'completed' | 'completed_at' | 'post_feeling' | 'created_at'> {
+export function generateRescuePlan(input: CheckinInput): Omit<RescuePlan, 'id' | 'user_id' | 'check_in_id' | 'completed' | 'completed_at' | 'post_feeling' | 'created_at'> {
   const goalPlans = PLANS[input.rescueGoal] ?? PLANS['Fitness'];
   const timePlans = goalPlans[input.timeAvailable] ?? goalPlans['5 minutes'];
   const template = timePlans[0];
