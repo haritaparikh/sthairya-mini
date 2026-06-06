@@ -35,7 +35,7 @@ export default function DashboardPage({ onRescue }: { onRescue: () => void }) {
     setLoading(true); setError('');
     try {
       const [checkinsRes, plansRes, allPlansRes] = await Promise.all([
-        supabase.from('checkins').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('check_ins').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('rescue_plans').select('*').eq('completed', true),
         supabase.from('rescue_plans').select('*').order('created_at', { ascending: false }).limit(20),
       ]);

@@ -9,7 +9,12 @@ import CompletionPage from './pages/CompletionPage';
 import DashboardPage from './pages/DashboardPage';
 import BottomNav from './components/BottomNav';
 import { supabase } from './lib/supabase';
+<<<<<<< HEAD
+import { generateRescuePlan } from './lib/rescue_plans';
+
+=======
 import { generateRescuePlan } from './lib/rescuePlans';
+>>>>>>> 15be2cf394451a4c3809a08f2d4a40125c8ee7b6
 import type { RescuePlan } from './lib/supabase';
 
 type Page = 'home' | 'rescue' | 'dashboard';
@@ -49,7 +54,7 @@ export default function App() {
     setPlanError('');
     try {
       const { data: checkin, error: checkinErr } = await supabase
-        .from('checkins')
+        .from('check_ins')
         .insert({ mood: data.mood, time_available: data.timeAvailable, rescue_goal: data.rescueGoal })
         .select()
         .single();
