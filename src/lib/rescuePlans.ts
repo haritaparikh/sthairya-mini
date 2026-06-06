@@ -223,7 +223,7 @@ export function generateRescuePlan(input: CheckinInput): Omit<RescuePlan, 'id' |
   const motivational_message = prefix + template.motivational_message;
 
   return {
-    plan_title: template.title,
+    title: template.title,
     motivational_message,
     steps: template.steps,
     duration_minutes: DURATION_MAP[input.timeAvailable] ?? 5,

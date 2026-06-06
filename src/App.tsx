@@ -1,7 +1,5 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from './contexts/AuthContext';
-import { saveCompletedWorkout } from './hooks/useStats';
-
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -9,12 +7,9 @@ import CheckinPage from './pages/CheckinPage';
 import RescuePlanPage from './pages/RescuePlanPage';
 import CompletionPage from './pages/CompletionPage';
 import DashboardPage from './pages/DashboardPage';
-
 import BottomNav from './components/BottomNav';
-
 import { supabase } from './lib/supabase';
 import { generateRescuePlan } from './lib/rescuePlans';
-
 import type { RescuePlan } from './lib/supabase';
 
 type Page = 'home' | 'rescue' | 'dashboard';
@@ -22,17 +17,12 @@ type Flow = 'checkin' | 'plan' | 'completion' | null;
 
 export default function App() {
   const { user, loading } = useAuth();
-
   const [showAuth, setShowAuth] = useState(false);
-
   const [page, setPage] = useState<Page>('home');
   const [flow, setFlow] = useState<Flow>(null);
-
   const [currentPlan, setCurrentPlan] = useState<RescuePlan | null>(null);
-
   const [postFeeling, setPostFeeling] = useState('');
   const [totalRescued, setTotalRescued] = useState(0);
-
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [planError, setPlanError] = useState('');
 
@@ -45,7 +35,6 @@ export default function App() {
 
   const handleNavChange = useCallback((p: Page) => {
     setPage(p);
-
     if (p === 'rescue') {
       setCurrentPlan(null);
       setPlanError('');
@@ -55,97 +44,56 @@ export default function App() {
     }
   }, []);
 
-  const handleGeneratePlan = useCallback(
-    async (data: {
-      mood: string;
-      timeAvailable: string;
-      rescueGoal: string;
-    }) => {
-      setGeneratingPlan(true);
-      setPlanError('');
+  const handleGeneratePlan = useCallback(async (data: { mood: string; timeAvailable: string; rescueGoal: string }) => {
+    setGeneratingPlan(true);
+    setPlanError('');
+    try {
+      const { data: checkin, error: checkinErr } = await supabase
+        .from('checkins')
+        .insert({ mood: data.mood, time_available: data.timeAvailable, rescue_goal: data.rescueGoal })
+        .select()
+        .single();
+      if (checkinErr) throw checkinErr;
 
-      try {
-        const { data: checkin, error: checkinErr } = await supabase
-          .from('check_ins')
-          .insert({
-            mood: data.mood,
-            time_available: data.timeAvailable,
-            rescue_goal: data.rescueGoal,
-          })
-          .select()
-          .single();
+      const planData = generateRescuePlan(data);
 
-        if (checkinErr) throw checkinErr;
+      const { data: plan, error: planErr } = await supabase
+        .from('rescue_plans')
+        .insert({ ...planData, checkin_id: checkin.id })
+        .select()
+        .single();
+      if (planErr) throw planErr;
 
-        const planData = generateRescuePlan(data);
+      setCurrentPlan(plan);
+      setFlow('plan');
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Failed to generate plan. Please try again.');
+    } finally {
+      setGeneratingPlan(false);
+    }
+  }, []);
 
-        const { data: plan, error: planErr } = await supabase
-          .from('rescue_plans')
-          .insert({
-            ...planData,
-            check_in_id: checkin.id,
-          })
-          .select()
-          .single();
+  const handlePlanComplete = useCallback(async (feeling: string) => {
+    if (!currentPlan) return;
+    try {
+      await supabase
+        .from('rescue_plans')
+        .update({ completed: true, completed_at: new Date().toISOString(), post_feeling: feeling })
+        .eq('id', currentPlan.id);
 
-        if (planErr) throw planErr;
+      const { count } = await supabase
+        .from('rescue_plans')
+        .select('id', { count: 'exact', head: true })
+        .eq('completed', true);
 
-        setCurrentPlan(plan);
-        setFlow('plan');
-      } catch (err) {
-        setPlanError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to generate plan. Please try again.'
-        );
-      } finally {
-        setGeneratingPlan(false);
-      }
-    },
-    []
-  );
-
-  const handlePlanComplete = useCallback(
-    async (feeling: string) => {
-      if (!currentPlan) return;
-
-      try {
-        await supabase
-          .from('rescue_plans')
-          .update({
-            completed: true,
-            completed_at: new Date().toISOString(),
-            post_feeling: feeling,
-          })
-          .eq('id', currentPlan.id);
-
-        const { count } = await supabase
-          .from('rescue_plans')
-          .select('id', { count: 'exact', head: true })
-          .eq('completed', true);
-
-        setPostFeeling(feeling);
-        setTotalRescued(count ?? 0);
-
-        saveCompletedWorkout({
-          date: new Date().toISOString(),
-          goal: 'Fitness',
-          plan_title: currentPlan.plan_title || 'Rescue Plan',
-          completed: true,
-          duration: currentPlan.duration || 5,
-          mood: feeling,
-          is_rescue: true,
-          note: '',
-        });
-      } catch {
-        setPostFeeling(feeling);
-        setTotalRescued(0);
-      }
-
-      setFlow('completion');
-    },
-    [currentPlan]
-  );
+      setPostFeeling(feeling);
+      setTotalRescued(count ?? 0);
+    } catch {
+      setPostFeeling(feeling);
+      setTotalRescued(0);
+    }
+    setFlow('completion');
+  }, [currentPlan]);
 
   const handleGoHome = useCallback(() => {
     setPage('home');
@@ -172,11 +120,10 @@ export default function App() {
         />
       );
     }
-
     return <LandingPage onGetStarted={() => setShowAuth(true)} />;
   }
 
-  // Completion screen
+  // Completion screen — full-screen, no nav
   if (flow === 'completion') {
     return (
       <CompletionPage
@@ -187,7 +134,7 @@ export default function App() {
     );
   }
 
-  // Rescue check-in
+  // Rescue check-in screen
   if (page === 'rescue' && flow === 'checkin') {
     return (
       <>
@@ -198,26 +145,17 @@ export default function App() {
             </div>
           </div>
         )}
-
-        <CheckinPage
-          loading={generatingPlan}
-          onGenerate={handleGeneratePlan}
-        />
-
+        <CheckinPage loading={generatingPlan} onGenerate={handleGeneratePlan} />
         <BottomNav current={page} onChange={handleNavChange} />
       </>
     );
   }
 
-  // Rescue plan
+  // Rescue plan screen
   if (page === 'rescue' && flow === 'plan' && currentPlan) {
     return (
       <>
-        <RescuePlanPage
-          plan={currentPlan}
-          onComplete={handlePlanComplete}
-        />
-
+        <RescuePlanPage plan={currentPlan} onComplete={handlePlanComplete} />
         <BottomNav current={page} onChange={handleNavChange} />
       </>
     );
@@ -227,18 +165,11 @@ export default function App() {
   return (
     <>
       {page === 'home' && <HomePage onRescue={startRescue} />}
-
       {page === 'rescue' && (
-        <CheckinPage
-          loading={generatingPlan}
-          onGenerate={handleGeneratePlan}
-        />
+        // Fallback: rescue page but flow is stale — reset to checkin
+        <CheckinPage loading={generatingPlan} onGenerate={handleGeneratePlan} />
       )}
-
-      {page === 'dashboard' && (
-        <DashboardPage onRescue={startRescue} />
-      )}
-
+      {page === 'dashboard' && <DashboardPage onRescue={startRescue} />}
       <BottomNav current={page} onChange={handleNavChange} />
     </>
   );

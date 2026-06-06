@@ -1,195 +1,276 @@
-import { Link } from 'react-router-dom';
-import { Flame, CalendarCheck, Shield, Zap, ArrowRight, Sparkles, Target } from 'lucide-react';
-import StatCard from '../components/StatCard';
-import { GOAL_LABELS, FitnessGoal } from '../types';
-import { useStats } from '../hooks/useStats';
+import { useCallback, useEffect, useState } from 'react';
+import { Flame, TrendingUp, Clock, Zap, ChevronRight } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import type { Checkin, RescuePlan } from '../lib/supabase';
 
-function aiInsight(streak: number, weeklyDone: number, weeklyTarget: number): string {
-  if (streak === 0) return "Start your first check-in today. Every great streak begins with day one.";
-  if (weeklyDone >= weeklyTarget) return `You've hit your weekly target of ${weeklyTarget} days. Outstanding consistency.`;
-  if (streak >= 7) return `${streak}-day streak. Your body is adapting well — consider nudging your intensity slightly.`;
-  if (weeklyDone === weeklyTarget - 1) return `One more session to hit your weekly target. You've got this.`;
-  return `${streak}-day streak and counting. Small wins protect big goals.`;
+type DashboardStats = {
+  totalRescued: number;
+  consistencyScore: number;
+  totalMinutes: number;
+  mostCommonObstacle: string;
+  recentCheckins: (Checkin & { plan?: RescuePlan })[];
+};
+
+const GOAL_EMOJI: Record<string, string> = {
+  Fitness: '🏋️', Meditation: '🧘', 'Weight loss': '🔥',
+  Strength: '💪', Flexibility: '🤸', 'Mental calm': '🌊',
+};
+const MOOD_EMOJI: Record<string, string> = {
+  'Low energy': '🪫', Stressed: '😤', Busy: '⏳', Travelling: '✈️',
+  'Sore body': '💪', 'Missed workout': '❌', 'Feeling guilty': '😔', 'Good and ready': '✨',
+};
+
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-export default function Dashboard() {
-  const stats = useStats();
+export default function DashboardPage({ onRescue }: { onRescue: () => void }) {
+  const { user } = useAuth();
+  const [stats,   setStats]   = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState('');
 
-  const onboarding = (() => {
+  const loadStats = useCallback(async () => {
+    setLoading(true); setError('');
     try {
-      const raw = localStorage.getItem('sthairya_onboarding');
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  })();
+      const [checkinsRes, plansRes, allPlansRes] = await Promise.all([
+        supabase.from('checkins').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('rescue_plans').select('*').eq('completed', true),
+        supabase.from('rescue_plans').select('*').order('created_at', { ascending: false }).limit(20),
+      ]);
+      if (checkinsRes.error) throw checkinsRes.error;
+      if (plansRes.error)    throw plansRes.error;
+      if (allPlansRes.error) throw allPlansRes.error;
 
-  const goal = (onboarding?.fitness_goal || 'general_fitness') as FitnessGoal;
-  const name = onboarding?.full_name || 'Champion';
+      const checkins: Checkin[]          = checkinsRes.data ?? [];
+      const completedPlans: RescuePlan[] = plansRes.data ?? [];
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+      const totalRescued  = completedPlans.length;
+      const totalMinutes  = completedPlans.reduce((s, p) => s + p.duration_minutes, 0);
 
-  const insight = aiInsight(stats.streak, stats.weeklyDone, stats.weeklyTarget);
+      const now = new Date();
+      let activeDays = 0;
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(now); day.setDate(now.getDate() - d);
+        if (completedPlans.some(p => localDateStr(new Date(p.created_at)) === localDateStr(day))) activeDays++;
+      }
+      const consistencyScore = Math.round((activeDays / 7) * 100);
 
-  const todayDone = stats.history.some((h) => {
-    const d = new Date(h.date);
-    const today = new Date();
+      const moodCount: Record<string, number> = {};
+      checkins.forEach(c => { moodCount[c.mood] = (moodCount[c.mood] ?? 0) + 1; });
+      const mostCommonObstacle = Object.entries(moodCount).sort((a, b) => b[1]-a[1])[0]?.[0] ?? '—';
+
+      const planMap = new Map<string, RescuePlan>();
+      (allPlansRes.data ?? []).forEach((p: RescuePlan) => { if (p.checkin_id) planMap.set(p.checkin_id, p); });
+
+      setStats({
+        totalRescued, consistencyScore, totalMinutes, mostCommonObstacle,
+        recentCheckins: checkins.slice(0, 5).map(c => ({ ...c, plan: planMap.get(c.id) })),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load stats');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { if (user) loadStats(); }, [user, loadStats]);
+
+  if (loading) {
     return (
-      h.completed &&
-      d.getDate() === today.getDate() &&
-      d.getMonth() === today.getMonth() &&
-      d.getFullYear() === today.getFullYear()
+      <div className="min-h-screen bg-charcoal-950 flex items-center justify-center">
+        <div className="w-7 h-7 border-2 border-charcoal-800 border-t-gold-500 rounded-full animate-spin-slow" />
+      </div>
     );
-  });
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-charcoal-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-[13px] text-charcoal-500">{error}</p>
+        <button onClick={loadStats} className="btn-ghost text-[13px] px-5 py-2.5">Retry</button>
+      </div>
+    );
+  }
+
+  const isEmpty = !stats || stats.totalRescued === 0;
 
   return (
     <div className="page-container">
-      <div className="page-content">
-        {/* Welcome card */}
-        <div className="glass-card p-6 mb-5 animate-fade-in relative overflow-hidden">
-          <div className="absolute inset-0 bg-hero-glow pointer-events-none" />
-          <div className="relative">
-            <p className="text-sm text-white/40 mb-1">{greeting}</p>
-            <h1 className="text-2xl font-bold mb-3">{name}</h1>
-            <div className="flex items-center gap-2 bg-gold/10 border border-gold/20 rounded-full px-3 py-1.5 w-fit">
-              <Target size={14} className="text-gold" />
-              <span className="text-sm font-medium text-gold">{GOAL_LABELS[goal]}</span>
-            </div>
-          </div>
+      <div className="page-inner">
+
+        {/* ── Header ───────────────────────────────── */}
+        <div className="page-header animate-fade-in" style={{ animationFillMode: 'both' }}>
+          <p className="section-label mb-2">Your progress</p>
+          <h1 className="heading-lg">Dashboard</h1>
         </div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <StatCard
-            label="Current Streak"
-            value={stats.streak === 0 ? '0 days' : `${stats.streak} day${stats.streak !== 1 ? 's' : ''}`}
-            icon={Flame}
-            accent="gold"
-          />
-          <StatCard label="Rescued Days" value={stats.rescued} icon={Shield} accent="warning" />
-          <StatCard label="Workouts Done" value={stats.totalCompleted} icon={Zap} accent="lime" />
-          <StatCard
-            label="Weekly Progress"
-            value={`${stats.weeklyDone}/${stats.weeklyTarget}`}
-            icon={CalendarCheck}
-            accent="purple"
-          />
-        </div>
-
-        {/* Weekly progress bar */}
-        <div className="glass-card p-5 mb-5 animate-slide-up">
-          <div className="flex items-center justify-between mb-3">
-            <span className="label">This Week</span>
-            <span className="text-sm text-white/50">
-              {stats.weeklyDone} of {stats.weeklyTarget} days
-            </span>
-          </div>
-          <div className="flex gap-1.5">
-            {Array.from({ length: stats.weeklyTarget }).map((_, i) => (
-              <div
-                key={i}
-                className={`h-2 flex-1 rounded-full transition-all duration-700 ${
-                  i < stats.weeklyDone ? 'bg-gold-lime' : 'bg-white/[0.06]'
-                }`}
+        {isEmpty ? (
+          <EmptyState onRescue={onRescue} />
+        ) : (
+          <>
+            {/* ── Stats grid ─────────────────────────── */}
+            <div className="grid grid-cols-2 gap-3 mb-7">
+              <BigStatCard
+                icon={Flame}
+                value={String(stats.totalRescued)}
+                label="Days rescued"
+                accent
+                delay={0}
               />
-            ))}
-          </div>
-          {stats.weeklyDone >= stats.weeklyTarget && (
-            <p className="text-xs text-lime mt-2">Weekly target reached!</p>
-          )}
-        </div>
+              <BigStatCard
+                icon={TrendingUp}
+                value={`${stats.consistencyScore}%`}
+                label="7-day streak"
+                delay={60}
+              />
+              <BigStatCard
+                icon={Clock}
+                value={String(stats.totalMinutes)}
+                label="Min rescued"
+                delay={120}
+              />
+              <BigStatCard
+                icon={Zap}
+                value={MOOD_EMOJI[stats.mostCommonObstacle] ?? '🎯'}
+                label={stats.mostCommonObstacle === '—' ? 'Top obstacle' : stats.mostCommonObstacle}
+                isEmoji
+                delay={180}
+              />
+            </div>
 
-        {/* AI Insight */}
-        <div
-          className="rounded-3xl overflow-hidden mb-5 animate-slide-up"
-          style={{ animationDelay: '100ms' }}
-        >
-          <div className="p-[1px] bg-gradient-to-br from-accent-purple/30 via-accent-blue/20 to-transparent">
-            <div className="bg-brand-graphite rounded-[23px] p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles size={14} className="text-accent-purple" />
-                <span className="text-xs font-semibold tracking-wider uppercase text-accent-purple">
-                  AI Insight
-                </span>
+            {/* ── Weekly activity ────────────────────── */}
+            <WeeklyBar completedPlans={stats.recentCheckins.flatMap(c => c.plan ? [c.plan] : [])} />
+
+            {/* ── Recent check-ins ───────────────────── */}
+            <div
+              className="animate-slide-up"
+              style={{ animationDelay: '260ms', animationFillMode: 'both' }}
+            >
+              <p className="section-label mb-4">Recent check-ins</p>
+              <div className="space-y-2.5">
+                {stats.recentCheckins.map((c, i) => (
+                  <div
+                    key={c.id}
+                    className="glass-card p-4 flex items-center justify-between animate-slide-up"
+                    style={{ animationDelay: `${280 + i * 50}ms`, animationFillMode: 'both' }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-charcoal-800 flex items-center justify-center text-base shrink-0">
+                        {GOAL_EMOJI[c.rescue_goal] ?? '🎯'}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-charcoal-100 tracking-tight truncate">{c.rescue_goal}</p>
+                        <p className="text-[11px] text-charcoal-600 mt-0.5 truncate">
+                          {MOOD_EMOJI[c.mood]} {c.mood} &nbsp;·&nbsp; {c.time_available}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      {c.plan?.completed
+                        ? <span className="badge-gold">✓ Rescued</span>
+                        : <span className="text-[11px] text-charcoal-700">—</span>}
+                      <p className="text-[10px] text-charcoal-700 mt-1.5">{formatDate(c.created_at)}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <p className="text-sm text-white/60 leading-relaxed">{insight}</p>
             </div>
-          </div>
-        </div>
-
-        {/* Today's action */}
-        <div
-          className="glass-card p-5 mb-6 animate-slide-up"
-          style={{ animationDelay: '200ms' }}
-        >
-          <span className="label mb-3 block">Today's Action</span>
-          {todayDone ? (
-            <>
-              <p className="text-base font-semibold mb-1">You've already trained today.</p>
-              <p className="text-sm text-white/50 mb-4">
-                Rest up and come back tomorrow. Consistency is your superpower.
-              </p>
-              <Link
-                to="/progress"
-                className="btn-secondary w-full flex items-center justify-center gap-2"
-              >
-                View Progress <ArrowRight size={16} />
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="text-base font-semibold mb-4">
-                Check in and get an AI plan tailored to how you feel today.
-              </p>
-              <Link
-                to="/checkin"
-                className="btn-primary w-full flex items-center justify-center gap-2"
-              >
-                Start Today's Check-In <ArrowRight size={16} />
-              </Link>
-            </>
-          )}
-        </div>
-
-        {/* Recent history preview */}
-        {stats.history.length > 0 && (
-          <div className="animate-slide-up" style={{ animationDelay: '300ms' }}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="label">Recent Workouts</span>
-              <Link to="/progress" className="text-xs text-gold hover:text-gold-light transition-colors">
-                View all
-              </Link>
-            </div>
-            <div className="space-y-2">
-              {stats.history.slice(0, 3).map((entry, i) => (
-                <div key={i} className="glass-card px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{entry.plan_title}</p>
-                    <p className="text-xs text-white/40 mt-0.5">
-                      {new Date(entry.date).toLocaleDateString('en-US', {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                      {' · '}
-                      {entry.duration} min
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {entry.is_rescue && (
-                      <span className="text-[10px] font-semibold tracking-wider uppercase text-warning bg-warning/10 border border-warning/20 rounded-full px-2 py-0.5">
-                        Rescue
-                      </span>
-                    )}
-                    <span className="text-[10px] font-semibold tracking-wider uppercase text-success bg-success/10 border border-success/20 rounded-full px-2 py-0.5">
-                      Done
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          </>
         )}
       </div>
     </div>
   );
+}
+
+function BigStatCard({
+  icon: Icon, value, label, accent = false, delay = 0, isEmoji = false,
+}: {
+  icon: React.ElementType; value: string; label: string;
+  accent?: boolean; delay?: number; isEmoji?: boolean;
+}) {
+  return (
+    <div
+      className="glass-card p-5 animate-slide-up"
+      style={{ animationDelay: `${delay}ms`, animationFillMode: 'both' }}
+    >
+      <div className="mb-3">
+        <div className={`w-7 h-7 rounded-xl flex items-center justify-center ${accent ? 'bg-gold-gradient shadow-gold-sm' : 'bg-charcoal-800'}`}>
+          <Icon size={13} className={accent ? 'text-charcoal-950' : 'text-gold-500'} />
+        </div>
+      </div>
+      <p className={`text-[28px] font-semibold tracking-tightest leading-none mb-1.5 ${isEmoji ? '' : 'gold-text'}`}>
+        {value}
+      </p>
+      <p className="text-[11px] text-charcoal-600 leading-tight">{label}</p>
+    </div>
+  );
+}
+
+function WeeklyBar({ completedPlans }: { completedPlans: RescuePlan[] }) {
+  const days = ['M','T','W','T','F','S','S'];
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7; // 0 = Mon
+
+  return (
+    <div
+      className="glass-card p-5 mb-6 animate-slide-up"
+      style={{ animationDelay: '220ms', animationFillMode: 'both' }}
+    >
+      <p className="section-label mb-4">This week</p>
+      <div className="flex gap-2">
+        {days.map((d, i) => {
+          const offset = (dow - i + 7) % 7;
+          const date = new Date(now);
+          date.setDate(now.getDate() - offset);
+          const str = localDateStr(date);
+          const active = completedPlans.some(p => localDateStr(new Date(p.created_at)) === str);
+          const isToday = i === dow;
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
+              <div className={[
+                'w-full aspect-square rounded-xl flex items-center justify-center transition-all',
+                active
+                  ? 'bg-gold-gradient shadow-gold-sm scale-105'
+                  : isToday
+                  ? 'bg-charcoal-800 border border-gold-700/30'
+                  : 'bg-charcoal-800/50',
+              ].join(' ')}>
+                {active && <Flame size={10} className="text-charcoal-950" />}
+              </div>
+              <span className={`text-[9px] font-medium ${isToday ? 'text-gold-500' : 'text-charcoal-700'}`}>
+                {d}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ onRescue }: { onRescue: () => void }) {
+  return (
+    <div className="text-center py-16 animate-fade-in" style={{ animationFillMode: 'both' }}>
+      <div className="w-20 h-20 rounded-3xl bg-charcoal-800/50 border border-charcoal-700/40 flex items-center justify-center mx-auto mb-6">
+        <Flame size={30} className="text-charcoal-700" />
+      </div>
+      <h2 className="text-[18px] font-semibold text-charcoal-300 tracking-tight mb-2">No rescues yet</h2>
+      <p className="text-[13px] text-charcoal-600 mb-8 leading-relaxed max-w-[220px] mx-auto">
+        Your progress appears here after your first rescue.
+      </p>
+      <button onClick={onRescue} className="btn-gold inline-flex items-center gap-2 px-6 py-3.5">
+        Start First Rescue
+        <ChevronRight size={15} />
+      </button>
+    </div>
+  );
+}
+
+function formatDate(iso: string) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return `${diff}d ago`;
 }
