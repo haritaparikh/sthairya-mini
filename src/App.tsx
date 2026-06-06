@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from './contexts/AuthContext';
+
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -7,9 +8,12 @@ import CheckinPage from './pages/CheckinPage';
 import RescuePlanPage from './pages/RescuePlanPage';
 import CompletionPage from './pages/CompletionPage';
 import DashboardPage from './pages/DashboardPage';
+
 import BottomNav from './components/BottomNav';
+
 import { supabase } from './lib/supabase';
 import { generateRescuePlan } from './lib/rescuePlans';
+
 import type { RescuePlan } from './lib/supabase';
 
 type Page = 'home' | 'rescue' | 'dashboard';
@@ -58,6 +62,7 @@ export default function App() {
       setPlanError('');
 
       try {
+        // Create check-in
         const { data: checkin, error: checkinErr } = await supabase
           .from('check_ins')
           .insert({
@@ -68,10 +73,15 @@ export default function App() {
           .select()
           .single();
 
-        if (checkinErr) throw checkinErr;
+        if (checkinErr) {
+          console.log('CHECKIN ERROR:', checkinErr);
+          throw checkinErr;
+        }
 
+        // Generate plan locally
         const planData = generateRescuePlan(data);
 
+        // Save rescue plan
         const { data: plan, error: planErr } = await supabase
           .from('rescue_plans')
           .insert({
@@ -81,11 +91,16 @@ export default function App() {
           .select()
           .single();
 
-        if (planErr) throw planErr;
+        if (planErr) {
+          console.log('PLAN ERROR:', planErr);
+          throw planErr;
+        }
 
         setCurrentPlan(plan);
         setFlow('plan');
       } catch (err) {
+        console.error(err);
+
         setPlanError(
           err instanceof Error
             ? err.message
@@ -103,7 +118,7 @@ export default function App() {
       if (!currentPlan) return;
 
       try {
-        await supabase
+        const { error } = await supabase
           .from('rescue_plans')
           .update({
             completed: true,
@@ -112,6 +127,11 @@ export default function App() {
           })
           .eq('id', currentPlan.id);
 
+        if (error) {
+          console.log('UPDATE ERROR:', error);
+          throw error;
+        }
+
         const { count } = await supabase
           .from('rescue_plans')
           .select('id', { count: 'exact', head: true })
@@ -119,7 +139,9 @@ export default function App() {
 
         setPostFeeling(feeling);
         setTotalRescued(count ?? 0);
-      } catch {
+      } catch (err) {
+        console.error(err);
+
         setPostFeeling(feeling);
         setTotalRescued(0);
       }
@@ -136,6 +158,7 @@ export default function App() {
     setPlanError('');
   }, []);
 
+  // Loading screen
   if (loading) {
     return (
       <div className="min-h-screen bg-charcoal-950 flex items-center justify-center">
@@ -158,7 +181,7 @@ export default function App() {
     return <LandingPage onGetStarted={() => setShowAuth(true)} />;
   }
 
-  // Completion screen
+  // Completion page
   if (flow === 'completion') {
     return (
       <CompletionPage
@@ -169,7 +192,7 @@ export default function App() {
     );
   }
 
-  // Rescue check-in
+  // Rescue check-in flow
   if (page === 'rescue' && flow === 'checkin') {
     return (
       <>
@@ -191,7 +214,7 @@ export default function App() {
     );
   }
 
-  // Rescue plan
+  // Rescue plan page
   if (page === 'rescue' && flow === 'plan' && currentPlan) {
     return (
       <>
@@ -205,7 +228,7 @@ export default function App() {
     );
   }
 
-  // Main pages
+  // Main app pages
   return (
     <>
       {page === 'home' && (
