@@ -19,7 +19,7 @@ Stores each user check-in session capturing mood, time available, and goal.
 Stores generated rescue plans linked to a check-in.
 - id (uuid, pk)
 - user_id (uuid, fk → auth.users, not null, defaults to auth.uid())
-- check_in_id (uuid, fk → checkins)
+- checkin_id (uuid, fk → checkins)
 - title (text)
 - motivational_message (text)
 - steps (jsonb) — array of step strings
@@ -66,7 +66,7 @@ CREATE POLICY "delete_own_checkins" ON checkins FOR DELETE
 CREATE TABLE IF NOT EXISTS rescue_plans (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
-  check_in_id uuid REFERENCES checkins(id) ON DELETE SET NULL,
+  checkin_id uuid REFERENCES checkins(id) ON DELETE SET NULL,
   title text NOT NULL,
   motivational_message text NOT NULL,
   steps jsonb NOT NULL DEFAULT '[]',
