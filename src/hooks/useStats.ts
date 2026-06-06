@@ -14,7 +14,7 @@ export interface HistoryEntry {
 function readHistory(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem('sthairya_history');
-    return raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
+    return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
@@ -23,49 +23,50 @@ function readHistory(): HistoryEntry[] {
 function computeStreak(history: HistoryEntry[]): number {
   if (history.length === 0) return 0;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const completedDates = history
+    .filter((h) => h.completed)
+    .map((h) => {
+      const d = new Date(h.date);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    });
 
-  // Collect unique completed workout dates as day timestamps
-  const completedDays = new Set(
-    history
-      .filter((h) => h.completed)
-      .map((h) => {
-        const d = new Date(h.date);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime();
-      })
-  );
+  const uniqueDates = [...new Set(completedDates)].sort((a, b) => b - a);
 
-  let streak = 0;
-  let cursor = today.getTime();
+  if (uniqueDates.length === 0) return 0;
+
+  let streak = 1;
   const DAY = 86400000;
 
-  while (completedDays.has(cursor) || completedDays.has(cursor - DAY)) {
-    if (completedDays.has(cursor)) {
+  for (let i = 0; i < uniqueDates.length - 1; i++) {
+    const diff = uniqueDates[i] - uniqueDates[i + 1];
+
+    if (diff === DAY) {
       streak++;
-      cursor -= DAY;
     } else {
-      // allow one uncounted day for "today not yet done"
-      cursor -= DAY;
+      break;
     }
-    if (!completedDays.has(cursor) && !completedDays.has(cursor - DAY)) break;
   }
 
   return streak;
 }
 
-function weeklyProgress(history: HistoryEntry[]): { done: number; target: number } {
+function weeklyProgress(history: HistoryEntry[]) {
   try {
     const raw = localStorage.getItem('sthairya_onboarding');
     const parsed = raw ? JSON.parse(raw) : null;
+
     const target = Number(parsed?.weekly_target) || 4;
 
     const now = new Date();
+
     const startOfWeek = new Date(now);
     startOfWeek.setHours(0, 0, 0, 0);
+
     const day = startOfWeek.getDay();
-    startOfWeek.setDate(startOfWeek.getDate() - (day === 0 ? 6 : day - 1)); // Monday start
+    startOfWeek.setDate(
+      startOfWeek.getDate() - (day === 0 ? 6 : day - 1)
+    );
 
     const done = history.filter((h) => {
       const d = new Date(h.date);
@@ -90,30 +91,63 @@ export interface Stats {
 
 function computeStats(): Stats {
   const history = readHistory();
+
   const { done, target } = weeklyProgress(history);
+
   return {
     history,
+
     streak: computeStreak(history),
-    rescued: history.filter((h) => h.is_rescue && h.completed).length,
-    totalCompleted: history.filter((h) => h.completed).length,
-    totalMinutes: history.reduce((acc, h) => acc + (h.completed ? h.duration : 0), 0),
+
+    rescued: history.filter(
+      (h) => h.is_rescue && h.completed
+    ).length,
+
+    totalCompleted: history.filter(
+      (h) => h.completed
+    ).length,
+
+    totalMinutes: history.reduce(
+      (acc, h) => acc + (h.completed ? h.duration : 0),
+      0
+    ),
+
     weeklyDone: done,
+
     weeklyTarget: target,
   };
+}
+
+export function saveCompletedWorkout(entry: HistoryEntry) {
+  try {
+    const existing = readHistory();
+
+    existing.unshift(entry);
+
+    localStorage.setItem(
+      'sthairya_history',
+      JSON.stringify(existing)
+    );
+
+    window.dispatchEvent(new Event('storage'));
+  } catch (err) {
+    console.error('Failed to save workout history', err);
+  }
 }
 
 export function useStats(): Stats {
   const [stats, setStats] = useState<Stats>(computeStats);
 
-  const refresh = useCallback(() => setStats(computeStats()), []);
+  const refresh = useCallback(() => {
+    setStats(computeStats());
+  }, []);
 
   useEffect(() => {
-    // Re-compute when another tab writes to localStorage
     window.addEventListener('storage', refresh);
-    // Re-compute when user returns to this tab
     window.addEventListener('focus', refresh);
-    // Re-compute when tab becomes visible (e.g. back from /plan)
     document.addEventListener('visibilitychange', refresh);
+
+    refresh();
 
     return () => {
       window.removeEventListener('storage', refresh);
