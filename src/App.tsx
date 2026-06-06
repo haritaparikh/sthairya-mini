@@ -59,7 +59,7 @@ export default function App() {
 
       const { data: plan, error: planErr } = await supabase
         .from('rescue_plans')
-        .insert({ ...planData, check_in_id: checkin.id })
+        .insert({ ...planData, checkin_id: checkin.id })
         .select()
         .single();
       if (planErr) throw planErr;
