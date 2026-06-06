@@ -49,7 +49,7 @@ export default function App() {
     setPlanError('');
     try {
       const { data: checkin, error: checkinErr } = await supabase
-        .from('checkins')
+        .from('check_ins')
         .insert({ mood: data.mood, time_available: data.timeAvailable, rescue_goal: data.rescueGoal })
         .select()
         .single();
